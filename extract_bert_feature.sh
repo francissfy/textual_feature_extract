@@ -2,6 +2,11 @@ bert_model_dir=$1
 text_file=$2
 # feat_name cannot include /
 feat_name=$3
+dst_dir=$4
+
+if [ ! "${dst_dir}" ]; then
+    dst_dir="."
+fi
 
 echo "text lines: $(wc -l "${text_file}")"
 
@@ -33,6 +38,9 @@ python3 jsonl2ark.py \
 for x in line_name.tmp pure_text.tmp; do
     if [ -f "${x}" ]; then rm ${x}; fi
 done
+
+# move to dst_dir
+mv "${feat_name}.jsonl ${feat_name}.scp ${feat_name}.scp" "${dst_dir}"
 
 echo "done"
 
