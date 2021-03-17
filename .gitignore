@@ -1,2 +1,6 @@
 .idea/
 data/
+glove.6B/
+*.ark
+*.scp
+glove.840B.300d.txt
