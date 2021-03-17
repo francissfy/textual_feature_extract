@@ -57,6 +57,7 @@ def main(args: argparse.Namespace):
                     while not word_list[widx].lower().startswith(feats_data[fidx]["token"]):
                         fidx += 1
                     subword_sidx[widx] = fidx
+                    fidx += 1
                 widx += 1
             # take the average over the subwords
             word_feats = []
@@ -67,7 +68,7 @@ def main(args: argparse.Namespace):
                 else:
                     if i == len(subword_sidx)-1:
                         # last word
-                        eidx = len(subword_sidx)-1
+                        eidx = len(feats_data)-1
                     elif subword_sidx[i+1] == -1:
                         # next word is SIL
                         if i+1 == len(subword_sidx)-1:
