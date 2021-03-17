@@ -4,8 +4,7 @@ import argparse
 import json
 import numpy as np
 from kaldiio import WriteHelper
-from typing import Tuple
-from collections import OrderedDict
+from typing import Tuple, List
 
 
 def json2np(line: str) -> Tuple[int, np.ndarray]:
@@ -40,41 +39,56 @@ def main(args: argparse.Namespace):
     ret_shapes = []
     with WriteHelper(f"ark,scp:feats.ark,feats.scp") as writer:
         for json_line, utt2num_phones_line in zip(json_lines, utt2num_phones_lines):
-            word2num_phones = OrderedDict()
+            word_list: List[str] = []
             lid, num_phones = utt2num_phones_line.split(" ", maxsplit=1)
             num_phones = num_phones.split(" ")
             for pair in num_phones:
-                w, dur = pair.split("|", maxsplit=1)
-                word2num_phones[w] = dur
+                w, _ = pair.split("|", maxsplit=1)
+                word_list.append(w)
             feats_data = json.loads(json_line)["features"]
-            offset = 0
-            sentence_feats = []
-            for word in word2num_phones.keys():
-                if word == "<SIL>":
-                    sentence_feats.append(np.zeros(bert_embed_dim, dtype=np.float))
+            # take the average of subwords
+            subword_sidx = [0 for _ in word_list]
+            widx = 0
+            fidx = 0
+            while widx < len(word_list):
+                if word_list[widx] == "<SIL>":
+                    subword_sidx[widx] = -1
                 else:
-                    while offset < len(feats_data):
-                        if word.lower().startswith(feats_data[offset]["token"]):
-                            sentence_feats.append(feats_data[offset]["layers"][0]["values"])
-                            offset += 1
-                            break
-                        offset += 1
-            assert len(sentence_feats) == len(word2num_phones.keys())
-            np_feats = np.array(sentence_feats, dtype=np.float)
-            ret_shapes.append(np_feats.shape)
-            writer(lid, np_feats)
-            # write the duration file
-            with open("bert_embed_dur", "w") as durwf:
-                durs = " ".join([str(d) for d in word2num_phones.values()])
-                durwf.write(f"{lid} {durs}\n")
+                    while not word_list[widx].lower().startswith(feats_data[fidx]["token"]):
+                        fidx += 1
+                    subword_sidx[widx] = fidx
+                widx += 1
+            # take the average over the subwords
+            word_feats = []
+            for i, sidx in enumerate(subword_sidx):
+                if sidx == -1:
+                    # SIL
+                    feat = np.zeros(256, dtype=np.float)
+                else:
+                    if i == len(subword_sidx)-1:
+                        # last word
+                        eidx = len(subword_sidx)-1
+                    elif subword_sidx[i+1] == -1:
+                        # next word is SIL
+                        if i+1 == len(subword_sidx)-1:
+                            # next word is SIL and is end of word seq
+                            eidx = len(feats_data)-1
+                        else:
+                            eidx = subword_sidx[i+2]
+                    else:
+                        # next word is common word
+                        eidx = sidx+1
+                    feat = np.mean([f["layers"][0]["values"] for f in feats_data[sidx: eidx]], axis=0, dtype=np.float)
+                word_feats.append(feat)
+            assert len(word_feats) == len(word_list)
+            word_feats = np.array(word_feats, dtype=np.float)
+            writer(lid, word_feats)
     if not os.path.exists(args.dst_dir):
         os.mkdir(args.dst_dir)
     if os.path.isfile("feats.ark"):
         shutil.move("feats.ark", args.dst_dir)
     if os.path.isfile("feats.scp"):
         shutil.move("feats.scp", args.dst_dir)
-    if os.path.isfile("bert_embed_dur"):
-        shutil.move("bert_embed_dur", args.dst_dir)
 
 
 if __name__ == "__main__":
