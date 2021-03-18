@@ -20,6 +20,8 @@ def main(args: argparse.Namespace):
             lktable[w] = feat
     feat_dim = next(iter(lktable.values())).shape[0]
     logging.info(f"glove name: {args.glove_file}, feat_dim: {feat_dim}")
+
+    key_mapping: Dict[str, str] = {}
     with open(args.utt2num_phones, "r") as uttf, WriteHelper(f"ark,scp:feats.ark,feats.scp") as ark_writer:
         while True:
             utt_line = uttf.readline().strip()
@@ -37,18 +39,34 @@ def main(args: argparse.Namespace):
                 elif word in lktable:
                     feat = lktable[word]
                 else:
-                    # use blurred search
                     similar_key = None
-                    for k in lktable.keys():
-                        if abs(len(k)-len(w))<len(word)/2 and (k.startswith(word) or word.startswith(k)):
-                            similar_key = k
-                            logging.info(f"find similar key: {word} -> {similar_key}")
-                            break
+                    if word in key_mapping:
+                        # find key in cache
+                        similar_key = key_mapping[word]
+                    else:
+                        # looking for similar key
+                        if word.endswith("'s"):
+                            # remove 's and look for solution
+                            striped_word = word[:-2]
+                            if striped_word in lktable:
+                                similar_key = striped_word
+                                # cache key
+                                key_mapping[word] = striped_word
+                                continue
+                            else:
+                                # use blurred search
+                                for k in lktable.keys():
+                                    if abs(len(k) - len(word)) < len(word) / 2 and (
+                                            k.startswith(word) or word.startswith(k)):
+                                        key_mapping[word] = k
+                                        similar_key = k
+                                        break
                     if similar_key is not None:
+                        logging.info(f"find similar key: {word} -> {similar_key}")
                         feat = lktable[similar_key]
                     else:
-                        feat = np.ones(feat_dim, dtype=np.float)
                         logging.info(f"word: {word} not found in glove file, use ones")
+                        feat = np.ones(feat_dim, dtype=np.float)
                         # raise KeyError(f"word: {word.lower()} not found in glove file")
                 word_feats.append(feat)
             ark_writer(lid, np.array(word_feats, dtype=np.float))
@@ -63,7 +81,7 @@ def main(args: argparse.Namespace):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--glove-file", type=str, default="./glove.6B/glove.6B.50d.txt")
-    parser.add_argument("--utt2phone-list", type=str, default="./data/dev/utt2num_phones")
+    parser.add_argument("--utt2num_phones", type=str, default="./data/dev/utt2num_phones")
     parser.add_argument("--dst-dir", type=str, default="./data/tmp")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
