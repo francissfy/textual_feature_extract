@@ -7,9 +7,16 @@ from kaldiio import WriteHelper
 from typing import Dict, List
 
 
-def main(args: argparse.Namespace):
-    lktable: Dict[str, np.ndarray] = {}
-    with open(args.glove_file, "r") as gf:
+lktable: Dict[str, np.ndarray] = {}
+key_mapping: Dict[str, str] = {}
+oov_keys = set()
+feat_dim = 300
+
+
+def load_table(table_file: str):
+    global lktable
+    global feat_dim
+    with open(table_file, "r") as gf:
         while True:
             gl_line = gf.readline().strip()
             if gl_line == "":
@@ -19,11 +26,16 @@ def main(args: argparse.Namespace):
             feat = np.array([float(f) for f in tmp[1:]],dtype=np.float)
             lktable[w] = feat
     feat_dim = next(iter(lktable.values())).shape[0]
-    logging.info(f"glove name: {args.glove_file}, feat_dim: {feat_dim}")
+    logging.info(f"glove name: {args.glove_file}, feat_dim: {feat_dim}, number of vocab: {len(lktable)}")
 
-    key_mapping: Dict[str, str] = {}
-    oov_keys = set()
-    with open(args.utt2num_phones, "r") as uttf, WriteHelper(f"ark,scp:feats.ark,feats.scp") as ark_writer:
+
+def convert_text(utt2phone: str, dst_dir: str):
+    global lktable
+    global key_mapping
+    global oov_keys
+    global feat_dim
+    with open(utt2phone, "r") as uttf: # WriteHelper(f"ark,scp:feats.ark,feats.scp") as ark_writer:
+        logging.info(f"converting file: {utt2phone}")
         while True:
             utt_line = uttf.readline().strip()
             if utt_line == "":
@@ -67,27 +79,40 @@ def main(args: argparse.Namespace):
                         feat = lktable[similar_key]
                     else:
                         oov_keys.add(word)
-                        feat = np.ones(feat_dim, dtype=np.float)
-                        # raise KeyError(f"word: {word.lower()} not found in glove file")
+                        feat = np.zeros(feat_dim, dtype=np.float)
                 word_feats.append(feat)
+            assert len(word_feats) == len(word_list)
             ark_writer(lid, np.array(word_feats, dtype=np.float))
+        if not os.path.exists(dst_dir):
+            os.mkdir(dst_dir)
+        if os.path.isfile("feats.scp"):
+            shutil.move("feats.scp", dst_dir)
+        if os.path.isfile("feats.ark"):
+            shutil.move("feats.ark", dst_dir)
+        logging.info(f"done processing {utt2phone}")
+
+
+def main(args: argparse.Namespace):
+    global lktable
+    global key_mapping
+    global oov_keys
+    load_table(args.glove_file)
+    for text_dir in args.text_dirs:
+        utt2phone_file = os.path.join(args.utt_dir, text_dir, "utt2num_phones")
+        dst_dir = os.path.join(args.dst_dir, text_dir)
+        convert_text(utt2phone_file, dst_dir)
     # logging the similar and oov keys
     for k in key_mapping.keys():
         logging.info(f"similar key: {k} -> {key_mapping[k]}")
     for k in oov_keys:
         logging.info(f"oov key: {k}")
-    if not os.path.exists(args.dst_dir):
-        os.mkdir(args.dst_dir)
-    if os.path.isfile("feats.ark"):
-        shutil.move("feats.ark", args.dst_dir)
-    if os.path.isfile("feats.scp"):
-        shutil.move("feats.scp", args.dst_dir)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--glove-file", type=str, default="./glove.6B/glove.6B.50d.txt")
-    parser.add_argument("--utt2num-phones", type=str, default="./data/dev/utt2num_phones")
+    parser.add_argument("--utt-dir", type=str)
+    parser.add_argument("--text-dirs", type=str, nargs="+")
     parser.add_argument("--dst-dir", type=str, default="./data/tmp")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
