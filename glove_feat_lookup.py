@@ -22,6 +22,7 @@ def main(args: argparse.Namespace):
     logging.info(f"glove name: {args.glove_file}, feat_dim: {feat_dim}")
 
     key_mapping: Dict[str, str] = {}
+    oov_keys = set()
     with open(args.utt2num_phones, "r") as uttf, WriteHelper(f"ark,scp:feats.ark,feats.scp") as ark_writer:
         while True:
             utt_line = uttf.readline().strip()
@@ -43,6 +44,8 @@ def main(args: argparse.Namespace):
                     if word in key_mapping:
                         # find key in cache
                         similar_key = key_mapping[word]
+                    elif word in oov_keys:
+                        similar_key = None
                     else:
                         # looking for similar key
                         if word.endswith("'s"):
@@ -52,7 +55,6 @@ def main(args: argparse.Namespace):
                                 similar_key = striped_word
                                 # cache key
                                 key_mapping[word] = striped_word
-                                continue
                             else:
                                 # use blurred search
                                 for k in lktable.keys():
@@ -62,14 +64,18 @@ def main(args: argparse.Namespace):
                                         similar_key = k
                                         break
                     if similar_key is not None:
-                        logging.info(f"find similar key: {word} -> {similar_key}")
                         feat = lktable[similar_key]
                     else:
-                        logging.info(f"word: {word} not found in glove file, use ones")
+                        oov_keys.add(word)
                         feat = np.ones(feat_dim, dtype=np.float)
                         # raise KeyError(f"word: {word.lower()} not found in glove file")
                 word_feats.append(feat)
             ark_writer(lid, np.array(word_feats, dtype=np.float))
+    # logging the similar and oov keys
+    for k in key_mapping.keys():
+        logging.info(f"similar key: {k} -> {key_mapping[k]}")
+    for k in oov_keys:
+        logging.info(f"oov key: {k}")
     if not os.path.exists(args.dst_dir):
         os.mkdir(args.dst_dir)
     if os.path.isfile("feats.ark"):
@@ -81,7 +87,7 @@ def main(args: argparse.Namespace):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--glove-file", type=str, default="./glove.6B/glove.6B.50d.txt")
-    parser.add_argument("--utt2num_phones", type=str, default="./data/dev/utt2num_phones")
+    parser.add_argument("--utt2num-phones", type=str, default="./data/dev/utt2num_phones")
     parser.add_argument("--dst-dir", type=str, default="./data/tmp")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
